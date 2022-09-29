@@ -1,0 +1,76 @@
+<html>
+<body style="max-width: 800px; margin: 0px auto; border: 1px solid grey">
+  <div style="width: 100%; display: flex; flex-direction: column; align-items: center">
+  <h2>CS663 Project 1 - Seng Heng</h2>
+  <h3 id="header">Landmark Detection in Localization</h3>
+  <p>One interesting problem in computer vision is the recognition of non-facial outdoor landmarks for the purpose of localization, or determining where a picture was taken. (Note that non-facial is an important distinction - there is a large body of work on detecting facial landmarks, i.e. facial shape). The landmarks themselves can be either generic or specific, though generic landmarks have a greater dependency on the data in the training set in order to produce accurate local coordinates. </p>
+  <p> The problem statement I was interested in is as follows: without the benefit of metadata, solely using the visuals in an photo and applied scene recognition, what would the approach be to identify where the photo was captured? The problem splits cleanly into two general cases - one case with no famous landmarks (all objects in scene are generic), and another with at least one famous landmark. These are similar problems and in broad strokes the current state of the art solutions have a similar architecture, but they require different data approaches for success. </p>
+  <p> Potential applications of a solution are widespread in both the real-time and async worlds. Asynchronously, a good enough solution for landmark recognition would massively speed up the task of image retrieval, as all photos without geotag metadata could have their location inferred and the photos then bucketed for display{1}{2}. A real-time solution would be a significant aid in navigation situations where GPS and cell service was unavailable in the generic case, and in the specific case could be used in AR-based applications with hyperlocal landmarks.{3}</p>
+
+  <div style="width: 80%; height: 1px; background-color: black"></div>
+
+  <h3 id="specific">Approach for Specific Landmarks</h3>
+  <image src="centroids.jpg" style="width: 400px"/>
+  <p>An example of reference images used to construct landmark centroids, retrieved from {1}</p>
+  <p>The two general approaches for localization involve classifying the world into subdivided regions to assign images to each region, and doing a direct large-scale input image comparison with geolocated/geotagged images to approximate the lat/long {2}, and hybrid approaches using both have been deployed in a production environment (mail.ru) {1}. In either case, we must start with a large amount of geotagged images as training data.</p>
+  <p>For location subdivision, due to the uneven distribution of images taken on the world's surface, regions are subdivided until approximately the same number of images exist in each 'cell'. In isolation, this approach exhibits low specificity - photos taken in the same general area may end up looking fairly similar and have similar features (architecture, sign styles, etc), even if in neighboring cells. </p>
+  <p>On the other hand, large scale image retrieval can be more accurate, but as the image set enters the tens of millions, compute costs skyrocket exponentially in both the training and inference steps {2}.</p>
+  <p>One approach to partially solve this problem is to note that many images of interest tend to have specific and unique landmarks in them. If the landmark could be detected, localization would in theory be quite simple for a large number of cases. In order to accomplish this, a landmark CNN (mail.ru chose Wide Residual Network (WRN-50-2) empirically) can be trained on a large number of labelled landmark images, boxing the data by continent and also introducing non-landmark images to encourage a loss function, marking only the parts of images that are potentially landmarks.</p>
+  <image src="landmarkcnn.jpg" style="width: 400px"/>
+  <span> Retrieved from {1}</span>
+  <p>Once this CNN has been trained, query images used as input can have their landmark candidate compared against a series of precomputed 'centroid' vectors each corresponding to a landmark - not only a specific landmark, but popular angles of said landmarks, as photos tend to be taken from roughly similar angles. This approach at mail.ru yielded 80% accuracy in an offline test without geolocation information. A match against a computed centroid done with k-nearest-neighbors confirms the presence of a landmark and angle; inferring the location of the picture from the known lat-long of the landmark and it's relative position in the image is then far more straightforward.</p>
+
+<div style="width: 80%; height: 1px; background-color: black"></div>
+
+  <h3 id="general">Approach for General Landmarks</h3>
+  <image src="latlong.jpg" style="width: 400px"/>
+  <p>Like-image retrieval using divided regions and image clustering, retrieved from {2}</p>
+  <p>The team at mail.ru estimated that their image corpus was roughly 1-3% specific and famous outdoor landmarks, with the rest not having any landmarks (or, in our terms, only having 'generic' landmarks). In this case, a hybrid method showed promise - creating three models of world partitioning with a 'backbone' EfficientNet CNN that subdivided the world in varying degrees of granularity, then clustering geotagged images within each cell to provide in-cell specificity, a method called 'Search In Cell' by the team at CERTH {2}. The three models were simple direct partitioning of the earth's surface, a hierarchical model at three sizes of cell, and a von Mises-Fisher (vMF) clustering.</p>
+  <p>This aggregate scheme divides-and-conquers the complexity of the image retrieval task, as clustering the latlong images within each cell region is far simpler. An input image has its candidate cell 'selected' by the region classifier, then similar images that belong to that cell are retrieved though k-nearest-neighbor, then the lat-longs of the retrieved images is weight-averaged to give a rough estimate of the input image's location. Obviously, without a specific landmark in view, it's likely not possible to get fine precision, but this approach allows for the geolocation of images of 'local' landmarks without having a specific model class for that landmark. On the IM2GPS data set, this approach yielded a 40.5% accuracy metric at the 10km bound.</p>
+
+<div style="width: 80%; height: 1px; background-color: black"></div>
+
+  <h3 id="hyperlocal">Approach for Hyperlocal Landmarks</h3>
+  <image src="hyperlocal.jpg" style="width: 400px"/>
+  <p>Identification of hyperlocal features in a specific area, retrieved from {3}</p>
+  <p>Moving away from the global scale, localization within very small areas, while a conceptually easier problem, still has commercial uses. When geofenced into a smaller area, landmarks that would be considered generic at the regional level can be marked as specific at the hyperlocal level if there's only a couple examples of them in the target space.</p>
+  <p>A team from Hosei University built a localized classifier for a small region at the university by hand labelling 542 images with local landmark ROIs,  lat-long, and compass direction, using this as training data for a Fast R-CNN model coupled with a Region Proposal Network (RPN). In this case, the landmarks to be identified were essentially unique to the region. Candidate images were fed throgh the CNN model, with the output vector being given to a feedforward NN in order to generate a candidate lat-long and compass direction, based on what landmarks were detected in the image.</p>
+  <p>While such an approach is temporally limited in the outdoors (as it's likely the feature detection will be impacted by weather changes and the like), it can be hugely useful for more static indoor applications, such as an AR application for attaching metadata to hyperlocal landmarks, and as an in-situ replacement for QR codes.</p>
+  <image src="ar_nomarker.jpg" style="width: 400px"/>
+  <p>AR based application in use at a museum, retrieved from {4}</p>
+
+<div style="width: 80%; height: 1px; background-color: black"></div>
+
+  <h3 id="conclusion">Conclusion</h3>
+  <p>While there's a significant amount of contemporary research in landmark-based localization, the ease of GPS access does mean that the scope of the problem is a bit limited in any situation where the input image is controlled and its data accessible. In any situation where the image comes from an unknown source, localization and landmark detection can unlock additional information.</p>
+
+<p>Quiz</p>
+
+<h3 id="references">References</h3>
+<p>{1}Andrei Boiarov and Eduard Tyantov. 2019. Large Scale Landmark Recognition via Deep Metric Learning. In The 28th ACM International Conference on
+Information and Knowledge Management (CIKM ’19), November 3–7, 2019,
+Beijing, China. ACM, New York, NY, USA, 10 pages. https://doi.org/10.1145/
+3357384.3357956 - Synopsis: mail.ru's commercial implementation of a landmark recognition system - Reliability: commercially deployed, fairly high</p>
+<p>{2}Giorgos Kordopatis-Zilos, Panagiotis Galopoulos, Symeon Papadopoulos,
+Ioannis Kompatsiaris. 2021. Leveraging EfficientNet and Contrastive Learning for Accurate Global-scale Location Estimation. In Proceedings of the
+2021 International Conference on Multimedia Retrieval (ICMR ’21), August
+21–24, 2021, Taipei, Taiwan. ACM, New York, NY, USA, 9 pages. https:
+//doi.org/10.1145/3460426.3463644 - Synopsis: A hybrid approach to global-scale localization based on global imagesets - Reliability: EU funded research, accuracy did gain, but the hybrid approach seemed to provide only marginal increases. Good for a review of the approaches it synthesized.</p>
+  <p>{3}Sivapong Nilwong, Delowar Hossain, Shin-ichiro Kaneko, and Genci Capi. 2018. Outdoor Landmark Detection for Real-World Localization using Faster R-CNN. In Proceedings of the 6th International Conference on Control, Mechatronics and Automation (ICCMA 2018). Association for Computing Machinery, New York, NY, USA, 165–169. https://doi-org.proxylib.csueastbay.edu/10.1145/3284516.3284532 - Synopsis: A team built a model to geolocate within a very small area near their university. - Reliability: Hosei University research team, fairly high</p>
+  <p>{4}Stavroula Tzima, Georgios Styliaras, and Athanasios Bassounas. 2021. Augmented Reality in Outdoor Settings: Evaluation of
+a Hybrid Image Recognition Technique. J. Comput. Cult. Herit. 14, 3, Article 31 (July 2021), 17 pages.
+https://doi.org/10.1145/3439953 - Synopsis: A review of a current approach to hyperlocal landmark detection using out of the box AR solutions, with not very good results without going to QR codes. - Reliability: Mostly useful as background information. </p>
+  <p>{5}A Hybrid Approach for Landmark Recognition using Deep Local Features and Residual Network-50, Nishant  Nimbare, Parth  Shah, Shail  Shah, Ramchandra  Mangrulkar, ITM Web Conf. 40 02001 (2021), DOI: 10.1051/itmconf/20214002001 - Synopsis: Threw some extant models at a Google landmark detection set, didn't get very interesting results. - Reliability: I think this team just plug-and-played some models to write a paper.</p>
+
+
+</div>
+
+  <div style="position: fixed; width: 200px; height: 300px; left: 100px; top: 100px;border: 1px solid grey">
+  <a href="#header">Header</a><br/>
+  <a href="#specific">Specific</a><br/>
+  <a href="#general">General</a><br/>
+  <a href="#hyperlocal">Hyperlocal</a><br/>
+  <a href="#conclusion">Conclusion</a><br/>
+</div>
+</body>
+</html>
